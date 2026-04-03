@@ -4,8 +4,10 @@ import sqlite3
 import json
 import math
 import random
+import os
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="VibeMatch API")
 
@@ -357,3 +359,8 @@ def generate_icebreaker(user_a: str, user_b: str):
     # Add a touch of neo-brutalist AI flavor
     prefix = random.choice(["[AI VIBE CHECK] ", "[AI RIZZ] ", "[MATCH DETECTED] "])
     return {"status": "success", "icebreaker": prefix + icebreaker}
+
+# --- Static Frontend Serving ---
+dist_path = os.path.join(os.path.dirname(__file__), "VibeMatchApp", "dist")
+if os.path.exists(dist_path):
+    app.mount("/", StaticFiles(directory=dist_path, html=True), name="static")

@@ -11,7 +11,7 @@ import { useRouter, Tabs } from 'expo-router';
 WebBrowser.maybeCompleteAuthSession();
 
 const SPOTIFY_CLIENT_ID = '26da15706e304db08c3b7ae991943759';
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = '';
 
 const discovery = {
   authorizationEndpoint: 'https://accounts.spotify.com/authorize',
@@ -65,7 +65,7 @@ export default function App() {
   }));
 
   const redirectUri = Platform.OS === 'web'
-    ? 'http://localhost:8081'
+    ? window.location.origin
     : makeRedirectUri({ scheme: 'vibematch' });
 
   const [request, response, promptAsync] = useAuthRequest(
