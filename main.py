@@ -1,0 +1,359 @@
+from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, field_validator
+import sqlite3
+import json
+import math
+import random
+from typing import Optional
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="VibeMatch API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# --- Database Helpers ---
+
+def get_db():
+    """Returns a context-managed SQLite connection."""
+    conn = sqlite3.connect('vibematch.db')
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    """Creates the users table (no Aadhar, with location support)."""
+    with sqlite3.connect('vibematch.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                age INTEGER NOT NULL,
+                gender TEXT NOT NULL,
+                top_artists TEXT NOT NULL,
+                latitude REAL DEFAULT 28.6139,
+                longitude REAL DEFAULT 77.2090
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_name TEXT NOT NULL,
+                receiver_name TEXT NOT NULL,
+                text TEXT NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.commit()
+
+
+# Initialize DB on startup
+init_db()
+
+
+# --- Pydantic Models ---
+
+class UserRegistration(BaseModel):
+    name: str
+    age: int
+    gender: str
+    top_artists: list[str]
+    latitude: float = 28.6139
+    longitude: float = 77.2090
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError('Name cannot be empty')
+        if len(v) > 50:
+            raise ValueError('Name must be 50 characters or less')
+        return v
+
+    @field_validator('age')
+    @classmethod
+    def validate_age(cls, v):
+        if v < 18:
+            raise ValueError('Must be at least 18 years old')
+        if v > 100:
+            raise ValueError('Age must be 100 or less')
+        return v
+
+    @field_validator('gender')
+    @classmethod
+    def validate_gender(cls, v):
+        allowed = {'Male', 'Female', 'Other'}
+        if v not in allowed:
+            raise ValueError(f'Gender must be one of: {", ".join(allowed)}')
+        return v
+
+    @field_validator('top_artists')
+    @classmethod
+    def validate_artists(cls, v):
+        if not v:
+            raise ValueError('Must have at least one top artist')
+        return v
+
+
+class MessageSendRequest(BaseModel):
+    sender_name: str
+    receiver_name: str
+    text: str
+
+
+# --- Business Logic ---
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate distance in km between two lat/lng points."""
+    R = 6371  # Earth radius in km
+    d_lat = math.radians(lat2 - lat1)
+    d_lon = math.radians(lon2 - lon1)
+    a = math.sin(d_lat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lon / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+
+def generate_outing_idea(shared_artists: list[str]) -> str:
+    """Simulates an AI generating a date idea based on music vibes."""
+    if not shared_artists:
+        return "Grab a coffee and figure out what music you DO agree on!"
+
+    vibe_map = {
+        "Arijit Singh": "a cozy rooftop cafe with live acoustic covers.",
+        "Pritam": "a lively Bollywood night at a local club.",
+        "KK": "a late-night drive to a retro music lounge.",
+        "The Weeknd": "a neon-lit arcade or a synth-wave bar.",
+        "Drake": "a high-energy hip-hop lounge.",
+        "Ankit Tiwari": "a quiet, dimly lit speakeasy.",
+        "Taylor Swift": "a sing-along karaoke night!",
+        "Dua Lipa": "a rooftop dance party with disco vibes.",
+    }
+
+    for artist in shared_artists:
+        if artist in vibe_map:
+            return f"Since you both love {artist}, you should check out {vibe_map[artist]}"
+
+    return f"Bond over your shared love for {shared_artists[0]} at a trendy local coffee shop."
+
+
+def calculate_vibe_match(user1_artists: list[str], user2_artists: list[str]):
+    """Calculates compatibility percentage using Jaccard similarity."""
+    set1, set2 = set(user1_artists), set(user2_artists)
+    shared = list(set1.intersection(set2))
+    if not set1 and not set2:
+        return 0.0, []
+    score = (len(shared) / len(set1.union(set2))) * 100
+    return round(score, 2), shared
+
+
+# --- API Endpoints ---
+
+@app.post("/register")
+def register_new_user(user: UserRegistration):
+    """Saves a new user. Simplified: no Aadhar, no email/phone."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        # Check if user already exists by name
+        cursor.execute("SELECT id FROM users WHERE name = ?", (user.name,))
+        existing = cursor.fetchone()
+        if existing:
+            # Update their artists and location instead
+            cursor.execute("""
+                UPDATE users SET top_artists = ?, latitude = ?, longitude = ?
+                WHERE name = ?
+            """, (json.dumps(user.top_artists), user.latitude, user.longitude, user.name))
+            conn.commit()
+            return {"status": "success", "message": f"Welcome back, {user.name}! Profile updated."}
+
+        cursor.execute("""
+            INSERT INTO users (name, age, gender, top_artists, latitude, longitude) 
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (user.name, user.age, user.gender, json.dumps(user.top_artists), user.latitude, user.longitude))
+        conn.commit()
+
+    return {"status": "success", "message": f"Welcome to VibeMatch, {user.name}!"}
+
+
+@app.get("/users/{user_name}")
+def get_user_profile(user_name: str):
+    """Retrieves a user's profile by name."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT name, age, gender, top_artists, latitude, longitude
+            FROM users WHERE name = ?
+        """, (user_name,))
+        row = cursor.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    return {
+        "status": "success",
+        "data": {
+            "name": row["name"],
+            "age": row["age"],
+            "gender": row["gender"],
+            "top_artists": json.loads(row["top_artists"]),
+            "latitude": row["latitude"],
+            "longitude": row["longitude"],
+        }
+    }
+
+
+@app.get("/matches")
+def find_potential_mates(
+    user_name: Optional[str] = Query(None, description="Name of the requesting user"),
+    min_age: int = 18,
+    max_age: int = 60,
+    gender_preference: Optional[str] = Query(None, description="Filter by gender: Male, Female, Other"),
+    max_distance_km: float = Query(10.0, description="Max distance in km"),
+):
+    """Fetches users within range, calculates compatibility, and suggests an outing."""
+
+    FALLBACK_ARTISTS = ['Pritam', 'Arijit Singh', 'Ankit Tiwari', 'Taimour Baig', 'KK']
+    my_lat, my_lon = 28.6139, 77.2090  # Default: New Delhi
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+
+        my_artists = FALLBACK_ARTISTS
+        if user_name:
+            cursor.execute("SELECT top_artists, latitude, longitude FROM users WHERE name = ?", (user_name,))
+            row = cursor.fetchone()
+            if row:
+                my_artists = json.loads(row["top_artists"])
+                my_lat = row["latitude"]
+                my_lon = row["longitude"]
+
+        query = """
+            SELECT name, age, gender, top_artists, latitude, longitude 
+            FROM users 
+            WHERE age BETWEEN ? AND ?
+        """
+        params = [min_age, max_age]
+
+        if gender_preference:
+            query += " AND gender = ?"
+            params.append(gender_preference)
+
+        cursor.execute(query, params)
+        db_users = cursor.fetchall()
+
+    match_results = []
+    for user in db_users:
+        db_name = user["name"]
+
+        # Exclude the requesting user
+        if user_name and db_name.strip() == user_name.strip():
+            continue
+
+        # Distance check
+        dist = haversine_km(my_lat, my_lon, user["latitude"], user["longitude"])
+        if dist > max_distance_km:
+            continue
+
+        db_artists_list = json.loads(user["top_artists"])
+        score, shared = calculate_vibe_match(my_artists, db_artists_list)
+
+        if score > 0:
+            date_idea = generate_outing_idea(shared)
+            match_results.append({
+                "name": db_name,
+                "age": user["age"],
+                "gender": user["gender"],
+                "compatibility_score": score,
+                "shared_artists": shared,
+                "ai_outing_suggestion": date_idea,
+                "distance_km": round(dist, 1),
+            })
+
+    match_results.sort(key=lambda x: x["compatibility_score"], reverse=True)
+    return {"status": "success", "total_matches": len(match_results), "data": match_results}
+
+# --- Chat Endpoints ---
+
+@app.post("/send-message")
+def send_message(req: MessageSendRequest):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO messages (sender_name, receiver_name, text)
+            VALUES (?, ?, ?)
+        """, (req.sender_name, req.receiver_name, req.text))
+        conn.commit()
+    return {"status": "success", "message": "Message sent."}
+
+@app.get("/chat-history")
+def get_chat_history(user_a: str, user_b: str):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT sender_name, receiver_name, text, timestamp
+            FROM messages
+            WHERE (sender_name = ? AND receiver_name = ?)
+               OR (sender_name = ? AND receiver_name = ?)
+            ORDER BY timestamp ASC
+        """, (user_a, user_b, user_b, user_a))
+        
+        columns = [column[0] for column in cursor.description]
+        results = []
+        for row in cursor.fetchall():
+            results.append(dict(zip(columns, row)))
+            
+    return {"data": results}
+
+@app.get("/generate-icebreaker")
+def generate_icebreaker(user_a: str, user_b: str):
+    """Simulates an AI generating a highly personalized music-based icebreaker."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name, top_artists FROM users WHERE name IN (?, ?)", (user_a, user_b))
+        rows = cursor.fetchall()
+        
+    if len(rows) < 2:
+        return {"status": "success", "icebreaker": "Hey! Up for a spontaneous music debate? 🎵"}
+        
+    user_a_artists = []
+    user_b_artists = []
+    for r in rows:
+        artists = json.loads(r["top_artists"])
+        if r["name"] == user_a:
+            user_a_artists = artists
+        else:
+            user_b_artists = artists
+            
+    score, shared = calculate_vibe_match(user_a_artists, user_b_artists)
+    
+    if shared:
+        artist = random.choice(shared)
+        starters = [
+            f"I see we both listen to {artist}! What's your favorite track of theirs right now? 🎵",
+            f"Okay, be honest: have you ever cried to a {artist} song? 😂",
+            f"Someone who likes {artist} as much as I do? This is rare. Thoughts on their latest album?",
+            f"{artist} fans unite! If you had to pick one song by them to listen to forever, what would it be? 🎧"
+        ]
+        icebreaker = random.choice(starters)
+    else:
+        if user_b_artists:
+            artist = random.choice(user_b_artists)
+            starters = [
+                f"I noticed you're a big fan of {artist}! I've been meaning to get into their music. Where should I start? 🤔",
+                f"Okay, sell me on {artist}. Why are they in your top artists? 🎶",
+                f"Your taste is interesting! I've never really listened to {artist}. What's the vibe?"
+            ]
+            icebreaker = random.choice(starters)
+        else:
+            icebreaker = "Hey! What's the one song you can't stop playing right now? 🎧"
+            
+    # Add a touch of neo-brutalist AI flavor
+    prefix = random.choice(["[AI VIBE CHECK] ", "[AI RIZZ] ", "[MATCH DETECTED] "])
+    return {"status": "success", "icebreaker": prefix + icebreaker}
