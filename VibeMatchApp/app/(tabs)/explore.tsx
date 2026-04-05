@@ -31,6 +31,7 @@ export default function ExploreScreen() {
   const [genderFilter, setGenderFilter] = useState<GenderFilter>('All');
   const [errorMsg, setErrorMsg] = useState('');
   const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState('');
 
   const router = useRouter();
 
@@ -54,11 +55,12 @@ export default function ExploreScreen() {
       completeWithSpotify(access_token);
     } else if (response?.type === 'error') {
       setLoading(false);
-      Alert.alert("Spotify Failed", response.error?.message || 'Unknown error');
+      setSyncError(response.error?.message || 'Unknown Spotify auth error');
     }
   }, [response]);
 
   const handleConnectSpotify = () => {
+    setSyncError('');
     setLoading(true);
     promptAsync();
     setTimeout(() => { setLoading(false); }, 10000);
@@ -83,11 +85,11 @@ export default function ExploreScreen() {
       });
 
       setLoading(false);
-      Alert.alert("Success!", "Your Spotify playlists have been embedded in your profile.");
+      setSyncError("Success! Your Spotify playlists have been embedded in your profile.");
       loadData();
-    } catch (e) {
+    } catch (e: any) {
       setLoading(false);
-      Alert.alert("Error", "Could not sync Spotify.");
+      setSyncError(e.message || "Error: Could not sync Spotify.");
     }
   };
 
@@ -273,7 +275,20 @@ export default function ExploreScreen() {
 
       {renderFilterChips()}
 
-      <TouchableOpacity style={styles.syncBtn} onPress={handleConnectSpotify} disabled={!request || loading}>
+      {syncError ? (
+        <View style={{ backgroundColor: syncError.startsWith('Success') ? '#1DB954' : '#FF0000', padding: 8, marginHorizontal: 20, marginBottom: 10, borderWidth: 3, borderColor: '#000' }}>
+          <Text style={{ color: syncError.startsWith('Success') ? '#000' : '#FFF', fontWeight: 'bold' }}>{syncError}</Text>
+        </View>
+      ) : null}
+
+      <TouchableOpacity 
+        style={[styles.syncBtn, (!request || loading) && { opacity: 0.5 }]} 
+        onPress={() => {
+          if (!request) setSyncError("Spotify Auth is not initialized yet. Please check your network or try again.");
+          else handleConnectSpotify();
+        }} 
+        disabled={loading}
+      >
         <Text style={styles.syncBtnText}>🎵 SYNC SPOTIFY PLAYLISTS</Text>
       </TouchableOpacity>
 
