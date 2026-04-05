@@ -5,6 +5,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import Animated, { FadeInUp, useSharedValue, useAnimatedStyle, withRepeat, withSequence, withTiming, Easing } from 'react-native-reanimated';
+import * as WebBrowser from 'expo-web-browser';
+import { makeRedirectUri, useAuthRequest } from 'expo-auth-session';
+import { Platform, Alert } from 'react-native';
+
+WebBrowser.maybeCompleteAuthSession();
+
+const SPOTIFY_CLIENT_ID = '26da15706e304db08c3b7ae991943759';
+const discovery = {
+  authorizationEndpoint: 'https://accounts.spotify.com/authorize',
+  tokenEndpoint: 'https://accounts.spotify.com/api/token',
+};
 
 const API_BASE_URL = 'https://insify.onrender.com';
 
@@ -22,6 +33,63 @@ export default function ExploreScreen() {
   const [currentUser, setCurrentUser] = useState<string | null>(null);
 
   const router = useRouter();
+
+  const redirectUri = Platform.OS === 'web'
+    ? window.location.origin + '/'
+    : makeRedirectUri({ scheme: 'vibematch' });
+
+  const [request, response, promptAsync] = useAuthRequest(
+    {
+      clientId: SPOTIFY_CLIENT_ID,
+      scopes: ['user-top-read', 'playlist-read-private'],
+      usePKCE: true,
+      redirectUri: redirectUri,
+    },
+    discovery
+  );
+
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { access_token } = response.params;
+      completeWithSpotify(access_token);
+    } else if (response?.type === 'error') {
+      setLoading(false);
+      Alert.alert("Spotify Failed", response.error?.message || 'Unknown error');
+    }
+  }, [response]);
+
+  const handleConnectSpotify = () => {
+    setLoading(true);
+    promptAsync();
+    setTimeout(() => { setLoading(false); }, 10000);
+  };
+
+  const completeWithSpotify = async (token: string) => {
+    try {
+      const spotRes = await axios.get('https://api.spotify.com/v1/me/top/artists', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const top_artists = spotRes.data.items.map((a: any) => a.name);
+
+      const playRes = await axios.get('https://api.spotify.com/v1/me/playlists?limit=3', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const playlists = playRes.data.items.map((p: any) => p.name);
+
+      await axios.post(`${API_BASE_URL}/update-playlists`, {
+        name: currentUser,
+        playlists: playlists,
+        top_artists: top_artists
+      });
+
+      setLoading(false);
+      Alert.alert("Success!", "Your Spotify playlists have been embedded in your profile.");
+      loadData();
+    } catch (e) {
+      setLoading(false);
+      Alert.alert("Error", "Could not sync Spotify.");
+    }
+  };
 
   // Continuous wiggling animation for sticker elements
   const rotation = useSharedValue(-2);
@@ -163,6 +231,15 @@ export default function ExploreScreen() {
           <Text style={[styles.ideaBody, item.is_rival && { color: '#FFF' }]}>📍 {item.ai_outing_suggestion}</Text>
         </View>
 
+        {item.playlists?.length > 0 && (
+          <View style={[styles.ideaSection, { backgroundColor: '#CCFF00', marginTop: -10 }]}>
+            <Text style={styles.ideaLabel}>PLAYLISTS</Text>
+            {item.playlists.map((pl: string, j: number) => (
+              <Text key={j} style={[styles.ideaBody, { fontSize: 13, textTransform: 'uppercase' }]}>✦ {pl}</Text>
+            ))}
+          </View>
+        )}
+
         <TouchableOpacity
           style={[styles.chatBtn, item.is_rival && { backgroundColor: '#FFF', borderColor: '#FF0000' }]}
           activeOpacity={0.8}
@@ -195,6 +272,10 @@ export default function ExploreScreen() {
       </View>
 
       {renderFilterChips()}
+
+      <TouchableOpacity style={styles.syncBtn} onPress={handleConnectSpotify} disabled={!request || loading}>
+        <Text style={styles.syncBtnText}>🎵 SYNC SPOTIFY PLAYLISTS</Text>
+      </TouchableOpacity>
 
       {loading && !refreshing ? (
         <View style={styles.centerContainer}>
@@ -259,13 +340,14 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0,
     transform: [{rotate: '-2deg'}],
   },
-  filterChipActive: {
-    backgroundColor: '#00FFFF', transform: [{rotate: '2deg'}],
-  },
+  filterChipActive: { backgroundColor: '#CCFF00', transform: [{rotate: '2deg'}] },
   filterText: { fontSize: 13, fontWeight: '900', color: '#000', textTransform: 'uppercase' },
   filterTextActive: { color: '#000' },
 
-  listContainer: { paddingHorizontal: 16 },
+  syncBtn: { backgroundColor: '#1DB954', paddingVertical: 14, marginHorizontal: 20, marginBottom: 20, borderWidth: 4, borderColor: '#000', alignItems: 'center', transform: [{rotate: '1deg'}], shadowColor: '#000', shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0 },
+  syncBtnText: { color: '#000', fontSize: 16, fontWeight: '900', letterSpacing: 1, textTransform: 'uppercase' },
+
+  listContainer: { paddingHorizontal: 16, paddingTop: 10 },
   
   card: {
     borderWidth: 5, borderColor: '#000', padding: 20, marginBottom: 28,

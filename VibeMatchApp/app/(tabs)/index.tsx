@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, FlatList, TouchableOpacity, ActivityIndicator, Alert, ScrollView, Image, Platform, useWindowDimensions, ImageBackground } from 'react-native';
+import { StyleSheet, Text, View, FlatList, TouchableOpacity, ActivityIndicator, Alert, ScrollView, Image, Platform, useWindowDimensions, ImageBackground, TextInput } from 'react-native';
 import axios from 'axios';
 import * as WebBrowser from 'expo-web-browser';
 import { makeRedirectUri, useAuthRequest } from 'expo-auth-session';
@@ -18,8 +18,8 @@ const discovery = {
   tokenEndpoint: 'https://accounts.spotify.com/api/token',
 };
 
-// Simplified flow: landing → finding-matches → matches
-type AppStep = 'landing' | 'finding-matches' | 'matches';
+// Simplified flow: landing → otp → finding-matches → matches
+type AppStep = 'landing' | 'otp' | 'finding-matches' | 'matches';
 
 export default function App() {
   const { height, width } = useWindowDimensions();
@@ -30,6 +30,12 @@ export default function App() {
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState('');
+
+  // Login Form State
+  const [loginName, setLoginName] = useState('');
+  const [loginPhone, setLoginPhone] = useState('');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginOtp, setLoginOtp] = useState('');
 
   // Continuous wiggling animation for sticker elements
   const rotation = useSharedValue(-2);
@@ -64,20 +70,51 @@ export default function App() {
     transform: [{ scale: pulse.value }],
   }));
 
-  const redirectUri = Platform.OS === 'web'
-    ? window.location.origin + '/'
-    : makeRedirectUri({ scheme: 'vibematch' });
+  const requestOtp = async () => {
+    if (!loginName || !loginPhone || !loginEmail) {
+      Alert.alert("Missing Fields", "Please fill in Name, Phone, and Email.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await axios.post(`${API_BASE_URL}/request-otp`, {
+        phone: loginPhone,
+        email: loginEmail
+      });
+      setCurrentStep('otp');
+    } catch (e) {
+      Alert.alert("Error", "Could not send OTP.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const [request, response, promptAsync] = useAuthRequest(
-    {
-      clientId: SPOTIFY_CLIENT_ID,
-      scopes: ['user-top-read'],
-      usePKCE: true,
-      redirectUri: redirectUri,
-    },
-    discovery
-  );
-
+  const verifyOtp = async () => {
+    if (!loginOtp) return;
+    setLoading(true);
+    try {
+      const res = await axios.post(`${API_BASE_URL}/verify-otp`, {
+        name: loginName,
+        phone: loginPhone,
+        email: loginEmail,
+        otp: loginOtp
+      });
+      if (res.data.status === 'success') {
+        const uName = res.data.name;
+        await AsyncStorage.setItem('loggedInUser', uName);
+        setLoggedInUser(uName);
+        setCurrentStep('finding-matches');
+        setTimeout(async () => {
+          await fetchMatches(uName);
+          setCurrentStep('matches');
+        }, 2500);
+      }
+    } catch (e: any) {
+      Alert.alert("Error", e.response?.data?.detail || "Invalid OTP");
+    } finally {
+      setLoading(false);
+    }
+  };
   // Check if user already logged in
   useEffect(() => {
     (async () => {
@@ -89,73 +126,6 @@ export default function App() {
       }
     })();
   }, []);
-
-  // Spotify callback
-  useEffect(() => {
-    if (response?.type === 'success') {
-      const { access_token } = response.params;
-      completeWithSpotify(access_token);
-    } else if (response?.type === 'error') {
-      setLoading(false);
-      Alert.alert("Spotify Failed", response.error?.message || 'Unknown error');
-    }
-  }, [response]);
-
-  const handleConnectSpotify = () => {
-    setLoading(true);
-    promptAsync();
-    setTimeout(() => { setLoading(false); }, 10000);
-  };
-
-  const completeWithSpotify = async (token: string) => {
-    try {
-      const spotRes = await axios.get('https://api.spotify.com/v1/me/top/artists', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const artists = spotRes.data.items.map((a: any) => a.name);
-      const meRes = await axios.get('https://api.spotify.com/v1/me', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const displayName = meRes.data.display_name || 'Listener';
-
-      await registerAndMatch(displayName, artists);
-    } catch (error: any) {
-      Alert.alert("Error", "Could not fetch Spotify data.");
-      setLoading(false);
-    }
-  };
-
-  const skipSpotifyDemo = async () => {
-    setLoading(true);
-    const demoName = 'Parth';
-    const demoArtists = ['Pritam', 'Arijit Singh', 'KK', 'Shaan', 'Atif Aslam', 'Darshan Raval'];
-    await registerAndMatch(demoName, demoArtists);
-  };
-
-  const registerAndMatch = async (userName: string, artists: string[]) => {
-    try {
-      await axios.post(`${API_BASE_URL}/register`, {
-        name: userName,
-        age: 24,
-        gender: 'Other',
-        top_artists: artists,
-        latitude: 28.6139,
-        longitude: 77.2090,
-      });
-      await AsyncStorage.setItem('loggedInUser', userName);
-      setLoggedInUser(userName);
-      setCurrentStep('finding-matches');
-
-      // Simulate matchmaking animation
-      setTimeout(async () => {
-        await fetchMatches(userName);
-        setCurrentStep('matches');
-      }, 2500);
-    } catch (error: any) {
-      Alert.alert("Error", error?.response?.data?.detail || "Registration failed.");
-      setLoading(false);
-    }
-  };
 
   const fetchMatches = async (userName: string) => {
     setLoading(true);
@@ -321,31 +291,69 @@ export default function App() {
           </Animated.View>
 
           <Animated.View entering={FadeInDown.delay(600).springify()} style={styles.ctaSection}>
-            <TouchableOpacity
-              style={[styles.spotifyBtn, (!request || loading) && styles.btnDisabled]}
-              onPress={handleConnectSpotify}
-              disabled={loading || !request}
-              activeOpacity={0.9}
-            >
-              {loading ? <ActivityIndicator color="#000" size="large" /> : (
-                <Text style={styles.spotifyBtnText}>🎵 CONNECT SPOTIFY & START</Text>
-              )}
-            </TouchableOpacity>
+            <TextInput style={styles.inputField} placeholder="YOUR NAME" placeholderTextColor="#666" value={loginName} onChangeText={setLoginName} />
+            <TextInput style={styles.inputField} placeholder="PHONE NUMBER" placeholderTextColor="#666" keyboardType="phone-pad" value={loginPhone} onChangeText={setLoginPhone} />
+            <TextInput style={styles.inputField} placeholder="EMAIL ADDRESS" placeholderTextColor="#666" keyboardType="email-address" value={loginEmail} onChangeText={setLoginEmail} />
 
             <TouchableOpacity
-              style={styles.demoBtn}
-              onPress={skipSpotifyDemo}
+              style={[styles.spotifyBtn, (loading) && styles.btnDisabled]}
+              onPress={requestOtp}
               disabled={loading}
               activeOpacity={0.9}
             >
-              <Text style={styles.demoBtnText}>TRY DEMO MODE →</Text>
+              {loading ? <ActivityIndicator color="#000" size="large" /> : (
+                <Text style={styles.spotifyBtnText}>REQUEST OTP →</Text>
+              )}
             </TouchableOpacity>
 
             <Text style={styles.footerNote}>
-              WE ONLY READ YOUR TOP ARTISTS. NOTHING ELSE.
+              WE WILL SEND A SIMULATED OTP TO VERIFY YOU.
             </Text>
           </Animated.View>
         </ScrollView>
+      </View>
+    );
+  }
+
+  // ========================================
+  // OTP ENTRY STEP
+  // ========================================
+  if (currentStep === 'otp') {
+    return (
+      <View style={[styles.landingWrap, { paddingTop: insets.top }]}>
+        <Tabs.Screen options={{ tabBarStyle: { display: 'none' } }} />
+        <ImageBackground 
+          source={require('../../assets/images/wavy_bg.png')} 
+          style={StyleSheet.absoluteFillObject}
+          resizeMode="cover"
+        />
+        <View style={{...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,0,127,0.3)'}} />
+        
+        <View style={styles.otpContainer}>
+          <Text style={styles.findingTitle}>ENTER OTP</Text>
+          <Text style={styles.findingSub}>We sent a simulated code to {loginPhone}</Text>
+          <Text style={styles.findingSub}>(Hint: Enter 1234)</Text>
+          
+          <TextInput 
+            style={[styles.inputField, { marginTop: 30, textAlign: 'center', fontSize: 32 }]} 
+            placeholder="----" 
+            placeholderTextColor="#666" 
+            keyboardType="number-pad" 
+            maxLength={4}
+            value={loginOtp} 
+            onChangeText={setLoginOtp} 
+          />
+
+          <TouchableOpacity
+            style={[styles.spotifyBtn, { marginTop: 20 }, (loading) && styles.btnDisabled]}
+            onPress={verifyOtp}
+            disabled={loading}
+          >
+            {loading ? <ActivityIndicator color="#000" size="large" /> : (
+              <Text style={styles.spotifyBtnText}>VERIFY & LOGIN →</Text>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -511,6 +519,9 @@ const styles = StyleSheet.create({
   demoBtnText: { color: '#000', fontSize: 16, fontWeight: '900' },
   btnDisabled: { opacity: 0.7 },
   footerNote: { marginTop: 24, fontSize: 13, color: '#000', textAlign: 'center', fontWeight: '900', letterSpacing: 1, backgroundColor: '#FFF', padding: 8, borderWidth: 2, borderColor: '#000', transform: [{rotate: '1deg'}] },
+
+  inputField: { backgroundColor: '#FFF', paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, fontWeight: '800', borderWidth: 4, borderColor: '#000', marginBottom: 12, width: '100%', shadowColor: '#000', shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0, transform: [{rotate: '-1deg'}], color: '#000' },
+  otpContainer: { backgroundColor: '#CCFF00', padding: 24, borderWidth: 6, borderColor: '#000', marginHorizontal: 20, marginTop: '20%', shadowColor: '#000', shadowOffset: { width: 10, height: 10 }, shadowOpacity: 1, shadowRadius: 0, transform: [{rotate: '2deg'}], alignItems: 'center' },
 
   // ---- FINDING MATCHES ----
   findingWrap: { flex: 1, backgroundColor: '#FF007F', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
