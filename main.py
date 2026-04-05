@@ -91,6 +91,10 @@ class UpdatePlaylists(BaseModel):
     playlists: list[str]
     top_artists: list[str]
 
+class CreateRoomReq(BaseModel):
+    dj_name: str
+    room_name: str
+
 
 class UserRegistration(BaseModel):
     name: str
@@ -617,6 +621,28 @@ def generate_beef(user_a: str, user_b: str):
         
     return {"status": "success", "beef": beef}
 
+# --- Live Rooms REST ---
+import uuid
+
+dj_rooms = {}
+
+@app.get("/rooms")
+def get_rooms():
+    return {"status": "success", "data": list(dj_rooms.values())}
+
+@app.post("/rooms")
+def create_room(req: CreateRoomReq):
+    room_id = str(uuid.uuid4())[:8]
+    room_data = {
+        "id": room_id,
+        "dj_name": req.dj_name,
+        "room_name": req.room_name,
+        "now_playing": "Waiting to start...",
+        "listeners": 0
+    }
+    dj_rooms[room_id] = room_data
+    return {"status": "success", "room": room_data}
+
 # --- WebSockets Server ---
 class ConnectionManager:
     def __init__(self):
@@ -645,18 +671,25 @@ manager = ConnectionManager()
 @app.websocket("/ws/live/{room_id}/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str):
     await manager.connect(room_id, websocket)
+    if room_id in dj_rooms:
+        dj_rooms[room_id]["listeners"] += 1
+        
     try:
         await manager.broadcast(room_id, {"type": "system", "text": f"{client_id} joined the room."})
         while True:
             data = await websocket.receive_text()
-            # Expecting JSON data for specific media controls from DJ or just chat
             try:
                 parsed_data = json.loads(data)
+                # If DJ updates the track
+                if parsed_data.get("type") == "now_playing" and room_id in dj_rooms:
+                    dj_rooms[room_id]["now_playing"] = parsed_data["track"]
                 await manager.broadcast(room_id, parsed_data)
             except:
                 await manager.broadcast(room_id, {"type": "chat", "client_id": client_id, "text": data})
     except WebSocketDisconnect:
         manager.disconnect(room_id, websocket)
+        if room_id in dj_rooms:
+            dj_rooms[room_id]["listeners"] = max(0, dj_rooms[room_id]["listeners"] - 1)
         await manager.broadcast(room_id, {"type": "system", "text": f"{client_id} disconnected."})
 
 # --- Static Frontend Serving ---

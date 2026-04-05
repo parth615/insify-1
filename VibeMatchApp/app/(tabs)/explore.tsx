@@ -217,7 +217,7 @@ export default function ExploreScreen() {
           </View>
         </View>
 
-        {item.shared_artists?.length > 0 && (
+        {item.playlists?.length > 0 && item.shared_artists?.length > 0 && (
           <View style={styles.chipRow}>
             {item.shared_artists.slice(0, 4).map((artist: string, i: number) => (
               <View key={i} style={[styles.chip, { transform: [{rotate: i % 2 === 0 ? '-2deg' : '3deg'}] }]}>
