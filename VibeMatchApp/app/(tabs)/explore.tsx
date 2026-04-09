@@ -14,6 +14,7 @@ import axios from 'axios';
 import { useAuthRequest } from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 
+
 WebBrowser.maybeCompleteAuthSession();
 
 // 1. Interface matches exactly what your Python backend sends
@@ -115,7 +116,7 @@ export default function ExploreScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#CCFF00" />
         }
-       renderItem={({ item }) => (
+        renderItem={({ item }) => (
   <TouchableOpacity 
     onPress={() => router.push({ 
       pathname: '/chat', 
