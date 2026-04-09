@@ -1,6 +1,7 @@
 """
-VibeMatch OTP Service
+VibeMatch OTP Service (Updated)
 Handles OTP generation, storage, and delivery via SMS (Twilio) and Email (SMTP).
+Includes automatic fallbacks to console for development.
 """
 
 import random
@@ -12,13 +13,16 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
 
+# Load .env at the very beginning
 load_dotenv()
 
+# Setup logging to see what's happening in your terminal
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- In-memory OTP Store (keyed by identifier, value = {code, expires_at}) ---
+# --- In-memory OTP Store ---
+# Using a dictionary to store OTPs: { "identifier": {"code": "1234", "expires_at": 1712510000} }
 _otp_store: dict[str, dict] = {}
-
 OTP_EXPIRY_SECONDS = 300  # 5 minutes
 
 
@@ -33,131 +37,111 @@ def store_otp(identifier: str, code: str):
         "code": code,
         "expires_at": time.time() + OTP_EXPIRY_SECONDS,
     }
-    logger.info(f"[OTP STORED] {identifier} -> {code} (expires in {OTP_EXPIRY_SECONDS}s)")
+    logger.info(f"✅ OTP Stored for {identifier}. Expires in 5m.")
 
 
 def verify_stored_otp(identifier: str, code: str) -> bool:
-    """Verify an OTP code against the store. Returns True if valid."""
+    """Verify an OTP code. Returns True if valid and not expired."""
     entry = _otp_store.get(identifier)
+    
     if not entry:
+        logger.warning(f"❌ No OTP found for {identifier}")
         return False
+    
+    # Check if expired
     if time.time() > entry["expires_at"]:
+        logger.warning(f"⏰ OTP for {identifier} has expired.")
         del _otp_store[identifier]
         return False
+        
+    # Check if code matches
     if entry["code"] != code:
+        logger.warning(f"🚫 Incorrect code entered for {identifier}")
         return False
-    # OTP is valid — consume it
+    
+    # Success - Delete OTP so it can't be used twice (Security)
     del _otp_store[identifier]
     return True
 
 
 def send_otp_email(email: str, code: str) -> bool:
-    """
-    Send OTP via Email using SMTP.
-    Requires these env vars:
-      SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM_EMAIL
-    Falls back to console logging if not configured.
-    """
-    smtp_host = os.getenv("SMTP_HOST")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_password = os.getenv("SMTP_PASSWORD")
-    from_email = os.getenv("SMTP_FROM_EMAIL", smtp_user)
+    """Send OTP via SMTP (Gmail) or print to terminal if not configured."""
+    host = os.getenv("SMTP_HOST")
+    port = int(os.getenv("SMTP_PORT", "587"))
+    user = os.getenv("SMTP_USER")
+    pwd = os.getenv("SMTP_PASSWORD")
 
-    if not all([smtp_host, smtp_user, smtp_password]):
-        logger.warning(f"[EMAIL OTP FALLBACK] SMTP not configured. OTP for {email}: {code}")
-        print(f"\n{'='*50}")
-        print(f"📧 EMAIL OTP for {email}: {code}")
-        print(f"{'='*50}\n")
-        return True  # Don't block the flow
+    if not all([host, user, pwd]):
+        print(f"\n--- 📧 EMAIL FALLBACK ---")
+        print(f"To: {email}\nCode: {code}")
+        print(f"--------------------------\n")
+        return True
 
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"VibeMatch - Your Verification Code: {code}"
-        msg["From"] = from_email
+        msg = MIMEMultipart()
+        msg["Subject"] = f"{code} is your VibeMatch code"
+        msg["From"] = user
         msg["To"] = email
+        
+        body = f"Your VibeMatch verification code is: {code}"
+        msg.attach(MIMEText(body, "plain"))
 
-        html = f"""
-        <html>
-        <body style="font-family: -apple-system, sans-serif; background: #F4F7FB; padding: 40px;">
-            <div style="max-width: 400px; margin: auto; background: white; border-radius: 24px; padding: 40px; text-align: center;">
-                <h1 style="color: #0F172A; font-size: 28px;">🎵 VibeMatch</h1>
-                <p style="color: #64748B; font-size: 16px;">Your verification code is:</p>
-                <div style="background: #0055FF; color: white; font-size: 36px; font-weight: 900; padding: 20px; border-radius: 16px; letter-spacing: 8px; margin: 20px 0;">
-                    {code}
-                </div>
-                <p style="color: #94A3B8; font-size: 14px;">This code expires in 5 minutes.</p>
-            </div>
-        </body>
-        </html>
-        """
-        msg.attach(MIMEText(html, "html"))
-
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
+        with smtplib.SMTP(host, port) as server:
             server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.sendmail(from_email, email, msg.as_string())
-
-        logger.info(f"[EMAIL OTP SENT] {email}")
+            server.login(user, pwd)
+            server.send_message(msg)
+        logger.info(f"📧 Email sent successfully to {email}")
         return True
     except Exception as e:
-        logger.error(f"[EMAIL OTP FAILED] {email}: {e}")
-        print(f"\n📧 EMAIL OTP FALLBACK for {email}: {code}\n")
-        return True  # Don't block the flow
+        logger.error(f"Failed to send email: {e}")
+        return False
 
 
 def send_otp_sms(phone: str, code: str) -> bool:
-    """
-    Send OTP via SMS using Twilio.
-    Requires these env vars:
-      TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER
-    Falls back to console logging if not configured.
-    """
-    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-    twilio_phone = os.getenv("TWILIO_PHONE_NUMBER")
+    """Send OTP via Twilio or print to terminal if not configured."""
+    sid = os.getenv("TWILIO_ACCOUNT_SID")
+    token = os.getenv("TWILIO_AUTH_TOKEN")
+    from_num = os.getenv("TWILIO_PHONE_NUMBER")
 
-    if not all([account_sid, auth_token, twilio_phone]):
-        logger.warning(f"[SMS OTP FALLBACK] Twilio not configured. OTP for {phone}: {code}")
-        print(f"\n{'='*50}")
-        print(f"📱 SMS OTP for {phone}: {code}")
-        print(f"{'='*50}\n")
-        return True  # Don't block the flow
+    if not all([sid, token, from_num]):
+        print(f"\n--- 📱 SMS FALLBACK ---")
+        print(f"To: {phone}\nCode: {code}")
+        print(f"-------------------------\n")
+        return True
 
     try:
+        # Import inside the function so it doesn't crash if library is missing
         from twilio.rest import Client
-        client = Client(account_sid, auth_token)
-
-        # Ensure phone has country code
-        to_phone = phone if phone.startswith("+") else f"+91{phone}"
-
-        message = client.messages.create(
-            body=f"Your VibeMatch verification code is: {code}. It expires in 5 minutes.",
-            from_=twilio_phone,
-            to=to_phone,
+        client = Client(sid, token)
+        
+        # Ensure correct formatting for India (+91)
+        to_num = phone if phone.startswith("+") else f"+91{phone}"
+        
+        client.messages.create(
+            body=f"Your VibeMatch code: {code}",
+            from_=from_num,
+            to=to_num
         )
-        logger.info(f"[SMS OTP SENT] {phone} -> SID: {message.sid}")
+        logger.info(f"📱 SMS sent successfully to {phone}")
         return True
+    except ImportError:
+        logger.error("Twilio library not installed. Run 'pip install twilio'")
+        return False
     except Exception as e:
-        logger.error(f"[SMS OTP FAILED] {phone}: {e}")
-        print(f"\n📱 SMS OTP FALLBACK for {phone}: {code}\n")
-        return True  # Don't block the flow
+        logger.error(f"Twilio Error: {e}")
+        return False
 
 
 def send_otp_to_both(email: str, phone: str) -> str:
-    """
-    Generate a single OTP and attempt delivery to both email and phone.
-    Stores the OTP keyed by BOTH identifiers so user can verify with either.
-    Returns the generated code.
-    """
+    """Generates one OTP and tries to send via both channels."""
     code = generate_otp()
-
-    # Store under both identifiers so login can use either
+    
+    # Store it for both so the user can verify using either their email or phone
     store_otp(email, code)
     store_otp(phone, code)
-
-    # Attempt delivery
+    
+    # Attempt deliveries
     send_otp_email(email, code)
     send_otp_sms(phone, code)
-
+    
     return code

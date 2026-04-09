@@ -1,19 +1,6 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
-
+import { ThemeProvider, DarkTheme, DefaultTheme } from '@react-navigation/native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import * as WebBrowser from 'expo-web-browser';
-import { Platform } from 'react-native';
-
-if (Platform.OS === 'web') {
-  WebBrowser.maybeCompleteAuthSession();
-}
-
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -22,9 +9,9 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+        <Stack.Screen name="chat" options={{ title: 'Vibe Chat' }} />
+        <Stack.Screen name="live" options={{ title: 'Live Call', presentation: 'fullScreenModal' }} />
       </Stack>
-      <StatusBar style="auto" />
     </ThemeProvider>
   );
 }

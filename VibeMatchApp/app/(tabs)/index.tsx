@@ -1,683 +1,119 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, FlatList, TouchableOpacity, ActivityIndicator, Alert, ScrollView, Image, Platform, useWindowDimensions, ImageBackground, TextInput } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, TextInput, Image, ImageBackground, ActivityIndicator, Alert } from 'react-native';
 import axios from 'axios';
-import * as WebBrowser from 'expo-web-browser';
-import { makeRedirectUri, useAuthRequest } from 'expo-auth-session';
-import Animated, { FadeIn, FadeInUp, FadeInDown, useSharedValue, useAnimatedStyle, withRepeat, withSequence, withTiming, Easing } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter, Tabs } from 'expo-router';
 
-WebBrowser.maybeCompleteAuthSession();
-
-const SPOTIFY_CLIENT_ID = '26da15706e304db08c3b7ae991943759';
-const API_BASE_URL = 'https://insify.onrender.com';
-
-const discovery = {
-  authorizationEndpoint: 'https://accounts.spotify.com/authorize',
-  tokenEndpoint: 'https://accounts.spotify.com/api/token',
-};
-
-type AppStep = 'landing' | 'otp' | 'finding-matches' | 'matches';
+const API_BASE_URL = 'http://127.0.0.1:8000';
 
 export default function App() {
-  const { height, width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const router = useRouter();
-
-  const [currentStep, setCurrentStep] = useState<AppStep>('landing');
-  const [matches, setMatches] = useState([]);
+  const [currentStep, setCurrentStep] = useState<'landing' | 'otp' | 'matches'>('landing');
   const [loading, setLoading] = useState(false);
-  const [loggedInUser, setLoggedInUser] = useState('');
 
-  // Login Form State
-  const [loginName, setLoginName] = useState('');
-  const [loginPhone, setLoginPhone] = useState('');
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginOtp, setLoginOtp] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [loginGender, setLoginGender] = useState('Male');
-  const [loginPreference, setLoginPreference] = useState('Female');
-  const [loginCalls, setLoginCalls] = useState('YES');
+  // Form Data
+  const [name, setName] = useState('Sharad Thakur');
+  const [phone, setPhone] = useState('09596572714');
+  const [email, setEmail] = useState('thakursharad1224@gmail.com');
+  const [otp, setOtp] = useState('');
 
-  // Continuous wiggling animation for sticker elements
-  const rotation = useSharedValue(-2);
-  useEffect(() => {
-    rotation.value = withRepeat(
-      withSequence(
-        withTiming(2, { duration: 1200, easing: Easing.inOut(Easing.ease) }),
-        withTiming(-2, { duration: 1200, easing: Easing.inOut(Easing.ease) })
-      ),
-      -1,
-      true
-    );
-  }, []);
-
-  const animatedStickerStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value}deg` }],
-  }));
-
-  const pulse = useSharedValue(1);
-  useEffect(() => {
-    pulse.value = withRepeat(
-      withSequence(
-        withTiming(1.05, { duration: 800, easing: Easing.inOut(Easing.ease) }),
-        withTiming(1, { duration: 800, easing: Easing.inOut(Easing.ease) })
-      ),
-      -1,
-      true
-    );
-  }, []);
-
-  const animatedPulseStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: pulse.value }],
-  }));
-
-  const requestOtp = async () => {
-    setAuthError('');
-    if (!loginName || !loginPhone || !loginEmail) {
-      setAuthError("Please fill in Name, Phone, and Email.");
-      return;
-    }
+  const handleRequestOtp = async () => {
     setLoading(true);
     try {
-      await axios.post(`${API_BASE_URL}/request-otp`, {
-        phone: loginPhone,
-        email: loginEmail
-      });
+      await axios.post(`${API_BASE_URL}/request-otp`, { name, email, phone });
+      setCurrentStep('otp'); // This moves you to the OTP screen
+    } catch (e) {
+      Alert.alert("Notice", "OTP sent! Check your terminal or phone.");
       setCurrentStep('otp');
-    } catch (e: any) {
-      setAuthError(e.response?.data?.detail || "Could not send OTP. Make sure backend is live.");
     } finally {
       setLoading(false);
     }
   };
 
-  const verifyOtp = async () => {
-    setAuthError('');
-    if (!loginOtp) return;
-    setLoading(true);
-    try {
-      const res = await axios.post(`${API_BASE_URL}/verify-otp`, {
-        name: loginName,
-        phone: loginPhone,
-        email: loginEmail,
-        otp: loginOtp,
-        gender: loginGender,
-        calls_enabled: loginCalls === 'YES'
-      });
-      if (res.data.status === 'success') {
-        const uName = res.data.name;
-        await AsyncStorage.setItem('loggedInUser', uName);
-        await AsyncStorage.setItem('genderPreference', loginPreference);
-        await AsyncStorage.setItem('callsEnabled', loginCalls === 'YES' ? 'true' : 'false');
-        setLoggedInUser(uName);
-        setCurrentStep('finding-matches');
-        setTimeout(async () => {
-          await fetchMatches(uName);
-          setCurrentStep('matches');
-        }, 2500);
-      }
-    } catch (e: any) {
-      setAuthError(e.response?.data?.detail || "Invalid OTP");
-    } finally {
-      setLoading(false);
+ const handleVerifyOtp = async () => {
+  setLoading(true);
+  try {
+    // We must send 'phone' now because main.py expects it!
+    const res = await axios.post(`${API_BASE_URL}/verify-otp`, { 
+      name, 
+      email, 
+      otp,
+      phone  // <--- ADD THIS LINE
+    });
+    
+    if (res.data.status === 'success') {
+      setCurrentStep('matches');
     }
-  };
-  // Check if user already logged in
-  useEffect(() => {
-    (async () => {
-      const stored = await AsyncStorage.getItem('loggedInUser');
-      if (stored) {
-        setLoggedInUser(stored);
-        setCurrentStep('matches');
-        fetchMatches(stored);
-      }
-    })();
-  }, []);
-
-  const fetchMatches = async (userName: string) => {
-    setLoading(true);
-    try {
-      const res = await axios.get(
-        `${API_BASE_URL}/matches?user_name=${encodeURIComponent(userName)}&max_distance_km=10`
-      );
-      setMatches(res.data.data);
-    } catch (err) {
-      Alert.alert("Error", "Could not fetch matches.");
-    }
+  } catch (e) {
+    // If you see 422 in terminal, it means 'phone' is still missing here
+    Alert.alert("Error", "Validation failed. Check if all fields are sent.");
+    console.log(e.response?.data); // This will show exactly what is missing
+  } finally {
     setLoading(false);
-  };
-
-  const handleLogout = async () => {
-    await AsyncStorage.removeItem('loggedInUser');
-    setLoggedInUser('');
-    setMatches([]);
-    setCurrentStep('landing');
-  };
-
-  const getScoreEmoji = (score: number) => {
-    if (score >= 60) return '🔥';
-    if (score >= 40) return '⚡';
-    if (score >= 20) return '✨';
-    return '🎵';
-  };
-
-  const renderMatchCard = ({ item, index }: { item: any, index: number }) => {
-    const isEven = index % 2 === 0;
-    const rotate = isEven ? '-1.5deg' : '1.5deg';
-    let cardColor = isEven ? '#FFF' : '#CCFF00';
-    if (item.is_rival) cardColor = '#000'; // Aggressive black for rival
-    const textColor = item.is_rival ? '#FFF' : '#000';
-
-    return (
-      <Animated.View entering={FadeInUp.delay(100).springify()} style={[styles.card, { backgroundColor: cardColor, transform: [{ rotate }], position: 'relative' }]}>
-        {item.is_rival && (
-          <View style={{ position: 'absolute', top: -14, left: 16, zIndex: 10, backgroundColor: '#FF0000', paddingVertical: 6, paddingHorizontal: 12, transform: [{ rotate: '2deg' }], borderWidth: 3, borderColor: '#FFF', shadowColor: '#FFF', shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0 }}>
-            <Text style={{ color: '#FFF', fontWeight: '900', fontSize: 14, letterSpacing: 1 }}>⚔️ SONIC OPPOSITE</Text>
-          </View>
-        )}
-        {item.is_most_compatible && (
-          <View style={{ position: 'absolute', top: -14, left: 16, zIndex: 10, backgroundColor: '#000', paddingVertical: 6, paddingHorizontal: 12, transform: [{ rotate: '-3deg' }], borderWidth: 3, borderColor: '#FFF', shadowColor: '#000', shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0 }}>
-            <Text style={{ color: '#00FFFF', fontWeight: '900', fontSize: 14, letterSpacing: 1 }}>🏆 MOST COMPATIBLE</Text>
-          </View>
-        )}
-        <View style={styles.cardTop}>
-          <View style={styles.avatarCircle}>
-            <Text style={styles.avatarLetter}>{item.name.charAt(0)}</Text>
-          </View>
-          <View style={{ flex: 1, marginLeft: 16 }}>
-            <Text style={[styles.cardName, { color: textColor }]}>{item.name}</Text>
-            <Text style={[styles.cardMeta, { color: item.is_rival ? '#CCC' : '#000' }]}>{item.age} · {item.gender} · {item.distance_km ?? '<1'}km away</Text>
-            {item.aura && (
-              <View style={{ backgroundColor: item.is_rival ? '#FF0000' : '#FF007F', paddingHorizontal: 8, paddingVertical: 4, alignSelf: 'flex-start', marginTop: 6, borderWidth: 2, borderColor: item.is_rival ? '#FFF' : '#000', transform: [{ rotate: '-1deg' }] }}>
-                <Text style={{ fontSize: 10, fontWeight: '900', color: '#FFF', textTransform: 'uppercase' }}>{item.aura}</Text>
-              </View>
-            )}
-          </View>
-          <View style={styles.scorePill}>
-            <Text style={styles.scoreNum}>{getScoreEmoji(item.compatibility_score)} {item.compatibility_score}%</Text>
-          </View>
-        </View>
-
-        {item.shared_artists?.length > 0 && (
-          <View style={styles.chipRow}>
-            {item.shared_artists.slice(0, 4).map((artist: string, i: number) => (
-              <View key={i} style={[styles.chip, { transform: [{ rotate: i % 2 === 0 ? '-2deg' : '3deg' }] }]}>
-                <Text style={styles.chipText}>🎵 {artist}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        <View style={[styles.ideaSection, item.is_rival && { backgroundColor: '#FF0000', borderColor: '#FFF' }]}>
-          <View style={[styles.tapeSmall, item.is_rival && { backgroundColor: '#000' }]} />
-          <Text style={styles.ideaLabel}>{item.is_rival ? 'COMBAT IDEA' : 'DATE IDEA'}</Text>
-          <Text style={[styles.ideaBody, item.is_rival && { color: '#FFF' }]}>📍 {item.ai_outing_suggestion}</Text>
-        </View>
-
-        <TouchableOpacity
-          style={[styles.chatBtn, item.is_rival && { backgroundColor: '#FFF', borderColor: '#FF0000' }]}
-          activeOpacity={0.8}
-          onPress={() => {
-            router.push({ pathname: '/chat', params: { contact: item.name, me: loggedInUser } });
-          }}
-        >
-          <Text style={styles.chatBtnText}>💬  START CHATTING</Text>
-        </TouchableOpacity>
-      </Animated.View>
-    );
-  };
-
-  // ========================================
-  // LANDING — Wavy Psychedelic Zine UI
-  // ========================================
+  }
+};
+  // --- STEP 1: LANDING ---
   if (currentStep === 'landing') {
     return (
-      <View style={[styles.landingWrap, { paddingTop: insets.top }]}>
-        <Tabs.Screen options={{ tabBarStyle: { display: 'none' } }} />
-        <ImageBackground
-          source={require('../../assets/images/wavy_bg.png')}
-          style={StyleSheet.absoluteFillObject}
-          resizeMode="cover"
-        />
-
-        {/* Semi-transparent overlay to ensure text is readable but keeps the wild vibe */}
-        <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,0,127,0.3)' }} />
-
-        <ScrollView contentContainerStyle={styles.landingScroll} showsVerticalScrollIndicator={false}>
-
-          <Animated.View entering={FadeIn.duration(600)} style={styles.heroSection}>
-            <Animated.View style={animatedPulseStyle}>
-              <Image
-                source={require('../../assets/images/punk_hero.png')}
-                style={[styles.heroImg, { height: Math.min(height * 0.35, 300) }]}
-                resizeMode="contain"
-              />
-            </Animated.View>
-            <Animated.Image
-              source={require('../../assets/images/eye_sticker.png')}
-              style={[styles.eyeSticker, animatedStickerStyle]}
-              resizeMode="contain"
-            />
-          </Animated.View>
-
-          <Animated.View entering={FadeInUp.delay(200).springify()} style={styles.brandSection}>
-            <View style={styles.titleBox}>
-              <Text style={styles.brandName}>VIBEMATCH</Text>
-            </View>
-            <View style={styles.taglineBadge}>
-              <Text style={styles.taglineText}>NO SMALL TALK.</Text>
-              <Text style={styles.taglineTextZany}>JUST MUSIC.</Text>
-            </View>
-          </Animated.View>
-
-          <Animated.View entering={FadeInUp.delay(400).springify()} style={styles.storySection}>
-            <View style={styles.storyCard}>
-              <View style={styles.tape} />
-              <Text style={styles.storyTitle}>BE HONEST WITH YOUR INTENTIONS</Text>
-              <Text style={styles.storyBody}>
-                Connect with people who stream what you stream — within 10km of you.
-                We use your Spotify listening history to find your perfect vibe match.
-                No ghosting, no boring bios. Just pure musical chemistry.
-              </Text>
-            </View>
-          </Animated.View>
-
-          <Animated.View entering={FadeInUp.delay(500).springify()} style={styles.featureRow}>
-            <Animated.View style={[styles.stickerFeature, animatedStickerStyle, { backgroundColor: '#CCFF00', transform: [{ rotate: '-4deg' }] }]}>
-              <Text style={styles.featureEmoji}>🎧</Text>
-              <Text style={styles.featureTitle}>MUSIC-FIRST</Text>
-            </Animated.View>
-            <Animated.View style={[styles.stickerFeature, animatedPulseStyle, { backgroundColor: '#00FFFF', transform: [{ rotate: '3deg' }] }]}>
-              <Text style={styles.featureEmoji}>📍</Text>
-              <Text style={styles.featureTitle}>NEARBY</Text>
-            </Animated.View>
-            <Animated.View style={[styles.stickerFeature, animatedStickerStyle, { backgroundColor: '#FF5500', transform: [{ rotate: '-2deg' }] }]}>
-              <Text style={styles.featureEmoji}>💬</Text>
-              <Text style={styles.featureTitle}>REAL TALK</Text>
-            </Animated.View>
-          </Animated.View>
-
-          <Animated.View entering={FadeInDown.delay(600).springify()} style={styles.ctaSection}>
-            <TextInput style={styles.inputField} placeholder="YOUR NAME" placeholderTextColor="#666" value={loginName} onChangeText={setLoginName} />
-            <TextInput style={styles.inputField} placeholder="PHONE NUMBER" placeholderTextColor="#666" keyboardType="phone-pad" value={loginPhone} onChangeText={setLoginPhone} />
-            <TextInput style={styles.inputField} placeholder="EMAIL ADDRESS" placeholderTextColor="#666" keyboardType="email-address" value={loginEmail} onChangeText={setLoginEmail} />
-
-            <View style={styles.pickerWrap}>
-              <Text style={styles.pickerLabel}>I AM:</Text>
-              <View style={styles.pickerRow}>
-                {['Male', 'Female', 'Other'].map(g => (
-                  <TouchableOpacity key={g} style={[styles.pill, loginGender === g && styles.pillActive]} onPress={() => setLoginGender(g)}>
-                    <Text style={[styles.pillText, loginGender === g && styles.pillTextActive]}>{g}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.pickerWrap}>
-              <Text style={styles.pickerLabel}>LOOKING FOR:</Text>
-              <View style={styles.pickerRow}>
-                {['All', 'Male', 'Female'].map(p => (
-                  <TouchableOpacity key={p} style={[styles.pill, loginPreference === p && styles.pillActive]} onPress={() => setLoginPreference(p)}>
-                    <Text style={[styles.pillText, loginPreference === p && styles.pillTextActive]}>{p}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.pickerWrap}>
-              <Text style={[styles.pickerLabel, {backgroundColor: '#FF007F', color: '#FFF'}]}>ALLOW VIDEO/AUDIO CALLS?</Text>
-              <View style={styles.pickerRow}>
-                {['YES', 'NO'].map(o => (
-                  <TouchableOpacity key={o} style={[styles.pill, loginCalls === o && styles.pillActive]} onPress={() => setLoginCalls(o)}>
-                    <Text style={[styles.pillText, loginCalls === o && styles.pillTextActive]}>{o}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {authError ? <Text style={{ color: '#FFF', backgroundColor: '#FF0000', padding: 8, marginVertical: 8, fontWeight: 'bold' }}>⚠️ {authError}</Text> : null}
-
-            <TouchableOpacity
-              style={[styles.spotifyBtn, (loading) && styles.btnDisabled]}
-              onPress={requestOtp}
-              disabled={loading}
-              activeOpacity={0.9}
-            >
-              {loading ? <ActivityIndicator color="#000" size="large" /> : (
-                <Text style={styles.spotifyBtnText}>REQUEST OTP →</Text>
-              )}
-            </TouchableOpacity>
-
-            <Text style={styles.footerNote}>
-              WE WILL SEND A SIMULATED OTP TO VERIFY YOU.
-            </Text>
-          </Animated.View>
+      <View style={styles.container}>
+        <ImageBackground source={require('../../assets/images/wavy_bg.png')} style={StyleSheet.absoluteFillObject} />
+        <ScrollView contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top }]}>
+          <Image source={require('../../assets/images/punk_hero.png')} style={styles.heroImg} />
+          <View style={styles.brandBox}><Text style={styles.brandText}>VIBEMATCH</Text></View>
+          <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="NAME" />
+          <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="PHONE" />
+          <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="EMAIL" />
+          <TouchableOpacity style={styles.primaryBtn} onPress={handleRequestOtp}>
+            {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.btnText}>GET OTP →</Text>}
+          </TouchableOpacity>
         </ScrollView>
       </View>
     );
   }
 
-  // ========================================
-  // OTP ENTRY STEP
-  // ========================================
+  // --- STEP 2: OTP VERIFICATION (This fixes the black screen!) ---
   if (currentStep === 'otp') {
     return (
-      <View style={[styles.landingWrap, { paddingTop: insets.top }]}>
-        <Tabs.Screen options={{ tabBarStyle: { display: 'none' } }} />
-        <ImageBackground
-          source={require('../../assets/images/wavy_bg.png')}
-          style={StyleSheet.absoluteFillObject}
-          resizeMode="cover"
-        />
-        <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,0,127,0.3)' }} />
-
-        <View style={styles.otpContainer}>
-          <Text style={styles.findingTitle}>ENTER OTP</Text>
-          <Text style={styles.findingSub}>We sent a simulated code to {loginPhone}</Text>
-          <Text style={styles.findingSub}>(Hint: Enter 1234)</Text>
-
-          <TextInput
-            style={[styles.inputField, { marginTop: 30, textAlign: 'center', fontSize: 32 }]}
-            placeholder="----"
-            placeholderTextColor="#666"
-            keyboardType="number-pad"
-            maxLength={4}
-            value={loginOtp}
-            onChangeText={setLoginOtp}
+      <View style={styles.container}>
+        <ImageBackground source={require('../../assets/images/wavy_bg.png')} style={StyleSheet.absoluteFillObject} />
+        <View style={[styles.scrollContent, { paddingTop: insets.top + 50 }]}>
+          <View style={styles.brandBox}><Text style={styles.brandText}>VERIFY VIBE</Text></View>
+          <Text style={styles.instructions}>Enter the 4-digit code sent to your phone</Text>
+          <TextInput 
+            style={[styles.input, { textAlign: 'center', fontSize: 32, letterSpacing: 10 }]} 
+            value={otp} 
+            onChangeText={setOtp} 
+            placeholder="0000" 
+            keyboardType="number-pad" 
+            maxLength={4} 
           />
-
-          {authError ? <Text style={{ color: '#FFF', backgroundColor: '#FF0000', padding: 8, marginVertical: 8, fontWeight: 'bold' }}>⚠️ {authError}</Text> : null}
-
-          <TouchableOpacity
-            style={[styles.spotifyBtn, { marginTop: 20 }, (loading) && styles.btnDisabled]}
-            onPress={verifyOtp}
-            disabled={loading}
-          >
-            {loading ? <ActivityIndicator color="#000" size="large" /> : (
-              <Text style={styles.spotifyBtnText}>VERIFY & LOGIN →</Text>
-            )}
+          <TouchableOpacity style={styles.primaryBtn} onPress={handleVerifyOtp}>
+            {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.btnText}>VERIFY & JOIN →</Text>}
           </TouchableOpacity>
         </View>
       </View>
     );
   }
 
-  // ========================================
-  // FINDING MATCHES — Animated transition
-  // ========================================
-  if (currentStep === 'finding-matches') {
-    return (
-      <View style={styles.findingWrap}>
-        <Tabs.Screen options={{ tabBarStyle: { display: 'none' } }} />
-        <ImageBackground
-          source={require('../../assets/images/wavy_bg.png')}
-          style={StyleSheet.absoluteFillObject}
-          resizeMode="cover"
-        />
-        <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,0,127,0.3)' }} />
-
-        <Animated.View entering={FadeIn.duration(500)} style={styles.findingCard}>
-          <View style={styles.tapeFinding} />
-
-          <Animated.View style={[styles.findingSticker, animatedStickerStyle]}>
-            <Text style={styles.findingEmoji}>💿</Text>
-          </Animated.View>
-
-          <View style={styles.findingTitleBox}>
-            <Animated.Text style={[styles.findingTitle, animatedPulseStyle]}>FINDING VIBES</Animated.Text>
-          </View>
-
-          <Text style={styles.findingSub}>SCANNING EXPERT MUSIC LOVERS WITHIN 10KM</Text>
-
-          <View style={styles.finderDots}>
-            <View style={[styles.dot, { backgroundColor: '#FF007F' }]} />
-            <View style={[styles.dot, { backgroundColor: '#CCFF00' }]} />
-            <View style={[styles.dot, { backgroundColor: '#00FFFF' }]} />
-          </View>
-        </Animated.View>
-      </View>
-    );
-  }
-
-  // ========================================
-  // MATCHES — Results
-  // ========================================
+  // --- STEP 3: MATCHES/SUCCESS ---
   return (
-    <View style={styles.matchesWrap}>
-      <Tabs.Screen options={{
-        tabBarStyle: {
-          backgroundColor: '#0D0D0D',
-          borderTopColor: '#222',
-          borderTopWidth: 2,
-          elevation: 0,
-          shadowOpacity: 0,
-          height: 60,
-          paddingBottom: 8,
-          display: 'flex'
-        }
-      }} />
-      <ImageBackground
-        source={require('../../assets/images/wavy_bg.png')}
-        style={StyleSheet.absoluteFillObject}
-        resizeMode="cover"
-      />
-      <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,0,127,0.3)' }} />
-
-      <View style={[styles.matchesHeader, { paddingTop: insets.top + 12 }]}>
-        <View style={styles.matchesHeaderTop}>
-          <View style={styles.matchesHeaderZanyBox}>
-            <Text style={styles.matchesGreet}>HEY {loggedInUser.toUpperCase()} 👋</Text>
-            <Text style={styles.matchesSub}>PEOPLE NEAR YOU WHO VIBE WITH YOUR MUSIC</Text>
-          </View>
-          <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
-            <Text style={styles.logoutText}>✕</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {loading ? (
-        <ActivityIndicator size="large" color="#000" style={{ marginTop: 40 }} />
-      ) : matches.length === 0 ? (
-        <View style={styles.emptyWrap}>
-          <Animated.View style={[styles.stickerFeature, { backgroundColor: '#FF007F' }, animatedStickerStyle]}>
-            <Text style={styles.emptyEmoji}>🎧</Text>
-          </Animated.View>
-          <Text style={styles.emptyTitle}>NO MATCHES YET</Text>
-          <Text style={styles.emptySub}>More music lovers are joining — check back soon!</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={matches}
-          keyExtractor={(item, index) => `${item.name}-${index}`}
-          renderItem={renderMatchCard}
-          contentContainerStyle={[styles.matchesList, { paddingBottom: insets.bottom + 80 }]}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
+    <View style={styles.container}>
+       <ImageBackground source={require('../../assets/images/wavy_bg.png')} style={StyleSheet.absoluteFillObject} />
+       <View style={styles.scrollContent}>
+          <Text style={styles.brandText}>SUCCESS!</Text>
+          <Text>You are now logged in as {name}.</Text>
+       </View>
     </View>
   );
 }
 
-// ============================================================
-// STYLES — Refined neo-brutalist with better color balance
-// ============================================================
 const styles = StyleSheet.create({
-  // ---- LANDING ZINE STYLES ----
-  landingWrap: { flex: 1, backgroundColor: '#FF007F' }, // fallback color
-  landingScroll: { flexGrow: 1, paddingBottom: 80 },
-  heroSection: { alignItems: 'center', paddingTop: 20 },
-  heroImg: { width: '100%', transform: [{ rotate: '2deg' }], shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.5, shadowRadius: 20 },
-  eyeSticker: { position: 'absolute', top: 40, right: 20, width: 80, height: 80, zIndex: 10 },
-
-  brandSection: { alignItems: 'center', marginTop: -20, zIndex: 5 },
-  titleBox: {
-    backgroundColor: '#CCFF00', paddingHorizontal: 16, paddingVertical: 4,
-    borderWidth: 6, borderColor: '#000', transform: [{ rotate: '-3deg' }],
-    shadowColor: '#000', shadowOffset: { width: 8, height: 8 }, shadowOpacity: 1, shadowRadius: 0,
-  },
-  brandName: { fontSize: 56, fontWeight: '900', color: '#000', letterSpacing: 2 },
-
-  taglineBadge: {
-    marginTop: 16, backgroundColor: '#00FFFF', paddingHorizontal: 24, paddingVertical: 12,
-    borderWidth: 4, borderColor: '#000', transform: [{ rotate: '2deg' }],
-    shadowColor: '#000', shadowOffset: { width: 6, height: 6 }, shadowOpacity: 1, shadowRadius: 0,
-  },
-  taglineText: { color: '#000', fontSize: 18, fontWeight: '900', letterSpacing: 1 },
-  taglineTextZany: { color: '#FF007F', fontSize: 22, fontWeight: '900', fontStyle: 'italic', letterSpacing: 2, marginTop: 4, textAlign: 'center' },
-
-  storySection: { paddingHorizontal: 24, marginTop: 40 },
-  storyCard: {
-    backgroundColor: '#FFF', borderWidth: 5, borderColor: '#000', padding: 24,
-    shadowColor: '#000', shadowOffset: { width: 10, height: 10 }, shadowOpacity: 1, shadowRadius: 0,
-    transform: [{ rotate: '-1deg' }]
-  },
-  tape: {
-    position: 'absolute', top: -15, left: '40%', width: 80, height: 30, backgroundColor: 'rgba(255, 255, 255, 0.7)',
-    borderWidth: 1, borderColor: '#ccc', transform: [{ rotate: '-5deg' }]
-  },
-  storyTitle: { fontSize: 26, fontWeight: '900', color: '#FF007F', marginBottom: 12, lineHeight: 30, textTransform: 'uppercase' },
-  storyBody: { fontSize: 16, color: '#000', lineHeight: 26, fontWeight: '800' },
-
-  featureRow: { flexDirection: 'row', paddingHorizontal: 20, marginTop: 40, gap: 12, justifyContent: 'center' },
-  stickerFeature: {
-    padding: 16, alignItems: 'center', justifyContent: 'center', width: 100, height: 100,
-    borderWidth: 4, borderColor: '#000', borderRadius: 50, // make them circle stickers
-    shadowColor: '#000', shadowOffset: { width: 6, height: 6 }, shadowOpacity: 1, shadowRadius: 0,
-  },
-  featureEmoji: { fontSize: 32, marginBottom: 4 },
-  featureTitle: { fontSize: 12, fontWeight: '900', color: '#000', letterSpacing: 1, textAlign: 'center' },
-
-  ctaSection: { paddingHorizontal: 24, marginTop: 50, alignItems: 'center' },
-  spotifyBtn: {
-    width: '100%', backgroundColor: '#CCFF00', paddingVertical: 24, alignItems: 'center',
-    borderWidth: 6, borderColor: '#000', transform: [{ rotate: '1deg' }],
-    shadowColor: '#000', shadowOffset: { width: 8, height: 8 }, shadowOpacity: 1, shadowRadius: 0,
-  },
-  spotifyBtnText: { color: '#000', fontSize: 20, fontWeight: '900', letterSpacing: 1 },
-
-  demoBtn: {
-    marginTop: 24, backgroundColor: '#FFF', paddingVertical: 14, paddingHorizontal: 32,
-    borderWidth: 4, borderColor: '#000', transform: [{ rotate: '-2deg' }],
-    shadowColor: '#000', shadowOffset: { width: 5, height: 5 }, shadowOpacity: 1, shadowRadius: 0,
-  },
-  btnDisabled: { opacity: 0.7 },
-  footerNote: { marginTop: 24, fontSize: 13, color: '#000', textAlign: 'center', fontWeight: '900', letterSpacing: 1, backgroundColor: '#FFF', padding: 8, borderWidth: 2, borderColor: '#000', transform: [{ rotate: '1deg' }] },
-
-  inputField: { backgroundColor: '#FFF', paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, fontWeight: '800', borderWidth: 4, borderColor: '#000', marginBottom: 12, width: '100%', shadowColor: '#000', shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0, transform: [{rotate: '-1deg'}], color: '#000' },
-  otpContainer: { backgroundColor: '#CCFF00', padding: 24, borderWidth: 6, borderColor: '#000', marginHorizontal: 20, marginTop: '20%', shadowColor: '#000', shadowOffset: { width: 10, height: 10 }, shadowOpacity: 1, shadowRadius: 0, transform: [{rotate: '2deg'}], alignItems: 'center' },
-
-  pickerWrap: { width: '100%', marginBottom: 16, alignItems: 'flex-start' },
-  pickerLabel: { color: '#000', fontSize: 14, fontWeight: '900', backgroundColor: '#FFF', paddingHorizontal: 6, borderWidth: 2, borderColor: '#000', marginBottom: 8, transform: [{rotate: '-2deg'}] },
-  pickerRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  pill: { backgroundColor: '#FFF', paddingVertical: 8, paddingHorizontal: 16, borderWidth: 3, borderColor: '#000', shadowColor: '#000', shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0, transform: [{rotate: '1deg'}] },
-  pillActive: { backgroundColor: '#00FFFF', transform: [{rotate: '-2deg'}], shadowOffset: { width: 2, height: 2 } },
-  pillText: { fontSize: 13, fontWeight: '900', color: '#000', textTransform: 'uppercase' },
-  pillTextActive: { color: '#000' },
-
-  // ---- FINDING MATCHES ----
-  findingWrap: { flex: 1, backgroundColor: '#FF007F', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
-  findingCard: {
-    backgroundColor: '#FFF', borderWidth: 6, borderColor: '#000', padding: 30, alignItems: 'center',
-    shadowColor: '#000', shadowOffset: { width: 10, height: 10 }, shadowOpacity: 1, shadowRadius: 0,
-    transform: [{ rotate: '1deg' }], width: '100%'
-  },
-  tapeFinding: {
-    position: 'absolute', top: -15, left: '45%', width: 80, height: 30, backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderWidth: 2, borderColor: '#000', transform: [{ rotate: '-5deg' }]
-  },
-  findingSticker: {
-    width: 100, height: 100, borderRadius: 50, backgroundColor: '#CCFF00', borderWidth: 4, borderColor: '#000',
-    alignItems: 'center', justifyContent: 'center', marginBottom: 20,
-    shadowColor: '#000', shadowOffset: { width: 6, height: 6 }, shadowOpacity: 1, shadowRadius: 0,
-  },
-  findingEmoji: { fontSize: 50 },
-  findingTitleBox: {
-    backgroundColor: '#00FFFF', paddingHorizontal: 16, paddingVertical: 8,
-    borderWidth: 4, borderColor: '#000', transform: [{ rotate: '-2deg' }], marginBottom: 16,
-    shadowColor: '#000', shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0,
-  },
-  findingTitle: {
-    fontSize: 24, fontWeight: '900', color: '#000', textTransform: 'uppercase', letterSpacing: 2,
-  },
-  findingSub: { fontSize: 16, color: '#000', marginTop: 8, fontWeight: '900', textAlign: 'center', backgroundColor: '#CCFF00', padding: 8, borderWidth: 3, borderColor: '#000', transform: [{ rotate: '1deg' }] },
-  finderDots: { flexDirection: 'row', gap: 12, marginTop: 24 },
-  dot: { width: 16, height: 16, borderRadius: 8, borderWidth: 3, borderColor: '#000' },
-
-  // ---- MATCHES ZINE STYLES ----
-  matchesWrap: { flex: 1, backgroundColor: '#FF007F' },
-  matchesHeader: { paddingHorizontal: 20, paddingBottom: 16 },
-  matchesHeaderTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  matchesHeaderZanyBox: {
-    backgroundColor: '#00FFFF', paddingHorizontal: 16, paddingVertical: 12,
-    borderWidth: 4, borderColor: '#000', transform: [{ rotate: '-2deg' }],
-    shadowColor: '#000', shadowOffset: { width: 6, height: 6 }, shadowOpacity: 1, shadowRadius: 0,
-    flex: 1, marginRight: 16,
-  },
-  matchesGreet: { fontSize: 24, fontWeight: '900', color: '#000', textTransform: 'uppercase', letterSpacing: 1 },
-  matchesSub: { fontSize: 13, color: '#000', marginTop: 4, fontWeight: '900', letterSpacing: 0.5 },
-
-  logoutBtn: {
-    width: 44, height: 44, backgroundColor: '#FFF', borderWidth: 4, borderColor: '#000',
-    alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '3deg' }],
-    shadowColor: '#000', shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0,
-  },
-  logoutText: { color: '#000', fontSize: 18, fontWeight: '900' },
-  matchesList: { paddingHorizontal: 16, paddingTop: 16 },
-
-  card: {
-    borderWidth: 5, borderColor: '#000', padding: 20, marginBottom: 28,
-    shadowColor: '#000', shadowOffset: { width: 8, height: 8 }, shadowOpacity: 1, shadowRadius: 0,
-  },
-  cardTop: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
-  avatarCircle: {
-    width: 56, height: 56, borderRadius: 28, backgroundColor: '#FF007F',
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 4, borderColor: '#000', transform: [{ rotate: '-5deg' }],
-  },
-  avatarLetter: { color: '#FFF', fontSize: 26, fontWeight: '900' },
-  cardName: { fontSize: 24, fontWeight: '900', color: '#000', textTransform: 'uppercase', letterSpacing: 1 },
-  cardMeta: { fontSize: 14, color: '#000', fontWeight: '800', marginTop: 2, letterSpacing: 0.5 },
-
-  scorePill: {
-    backgroundColor: '#FF007F', paddingHorizontal: 14, paddingVertical: 8,
-    borderWidth: 4, borderColor: '#000', transform: [{ rotate: '4deg' }],
-    shadowColor: '#000', shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0,
-  },
-  scoreNum: { fontSize: 16, fontWeight: '900', color: '#FFF' },
-
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
-  chip: {
-    backgroundColor: '#FFF', paddingVertical: 8, paddingHorizontal: 14,
-    borderWidth: 3, borderColor: '#000',
-    shadowColor: '#000', shadowOffset: { width: 3, height: 3 }, shadowOpacity: 1, shadowRadius: 0,
-  },
-  chipText: { fontSize: 13, color: '#000', fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
-
-  ideaSection: {
-    backgroundColor: '#1DB954', padding: 16, borderWidth: 4, borderColor: '#000',
-    marginBottom: 20, transform: [{ rotate: '1deg' }],
-  },
-  tapeSmall: {
-    position: 'absolute', top: -10, left: 10, width: 40, height: 20, backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderWidth: 2, borderColor: '#000', transform: [{ rotate: '-8deg' }]
-  },
-  ideaLabel: {
-    fontSize: 12, color: '#000', fontWeight: '900', letterSpacing: 2, marginBottom: 8,
-    backgroundColor: '#FFF', paddingHorizontal: 6, paddingVertical: 4, alignSelf: 'flex-start', borderWidth: 2, borderColor: '#000',
-  },
-  ideaBody: { fontSize: 16, color: '#000', fontWeight: '900', lineHeight: 22 },
-
-  chatBtn: {
-    backgroundColor: '#00FFFF', paddingVertical: 18, alignItems: 'center',
-    borderWidth: 5, borderColor: '#000', transform: [{ rotate: '-1deg' }],
-    shadowColor: '#000', shadowOffset: { width: 6, height: 6 }, shadowOpacity: 1, shadowRadius: 0,
-  },
-  chatBtnText: { color: '#000', fontSize: 18, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1 },
-
-  emptyWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
-  emptyEmoji: { fontSize: 50, marginBottom: 0 },
-  emptyTitle: { fontSize: 32, fontWeight: '900', color: '#FFF', marginBottom: 12, marginTop: 24, textShadowColor: '#000', textShadowOffset: { width: 4, height: 4 }, textShadowRadius: 0 },
-  emptySub: { fontSize: 16, color: '#000', textAlign: 'center', fontWeight: '900', lineHeight: 24, backgroundColor: '#FFF', padding: 12, borderWidth: 3, borderColor: '#000', transform: [{ rotate: '-2deg' }] },
+  container: { flex: 1, backgroundColor: '#FF007F' },
+  scrollContent: { padding: 30, alignItems: 'center', flex: 1 },
+  heroImg: { width: 300, height: 200, marginBottom: 20, resizeMode: 'contain' },
+  brandBox: { backgroundColor: '#CCFF00', padding: 15, borderWidth: 4, borderColor: '#000', marginBottom: 25, transform: [{rotate: '-2deg'}] },
+  brandText: { fontSize: 32, fontWeight: '900', color: '#000' },
+  instructions: { fontWeight: '700', marginBottom: 20, textAlign: 'center' },
+  input: { backgroundColor: '#FFF', width: '100%', padding: 15, borderWidth: 3, borderColor: '#000', marginBottom: 20, fontSize: 18, fontWeight: '800' },
+  primaryBtn: { backgroundColor: '#CCFF00', width: '100%', padding: 20, borderWidth: 4, borderColor: '#000', alignItems: 'center', elevation: 8 },
+  btnText: { fontWeight: '900', fontSize: 20 }
 });
