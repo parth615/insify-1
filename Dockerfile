@@ -1,14 +1,14 @@
-# Choose a base image with Python
-FROM python:3.11-slim
+# Choose a base image with Node 20
+FROM node:20-bullseye-slim
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+# Install Python and system dependencies
+RUN apt-get update \
+    && apt-get install -y python3 python3-pip curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3 /usr/local/bin/python \
+    && ln -sf /usr/bin/pip3 /usr/local/bin/pip
 
-# Install Node.js
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs
-
-# Setup user for Hugging Face Spaces compatibility
+# Setup user for compatibility
 RUN useradd -m -u 1000 user
 USER user
 ENV HOME=/home/user \
@@ -18,7 +18,7 @@ WORKDIR $HOME/app
 
 # Copy the requirements file and install Python packages
 COPY --chown=user requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python3 -m pip install --no-cache-dir -r requirements.txt
 
 # Copy local code to the container image
 COPY --chown=user . .
