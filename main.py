@@ -19,6 +19,8 @@ app = FastAPI(title="VibeMatch API")
 
 if os.path.isdir("VibeMatchApp/web-build"):
     app.mount("/", StaticFiles(directory="VibeMatchApp/web-build", html=True), name="static")
+elif os.path.isdir("web-build"):
+    app.mount("/", StaticFiles(directory="web-build", html=True), name="static")
 else:
     print("WARNING: web-build directory is missing; static web UI will not be served.")
 
