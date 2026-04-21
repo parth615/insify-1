@@ -26,7 +26,7 @@ interface MatchUser {
 }
 
 const SPOTIFY_CLIENT_ID = '26da15706e304db08c3b7ae991943759';
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = '';
 
 const discovery = {
   authorizationEndpoint: 'https://accounts.spotify.com/authorize',
@@ -39,7 +39,9 @@ export default function ExploreScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const router = useRouter();
 
-  const redirectUri = "http://127.0.0.1:8081/callback";
+  const redirectUri = typeof window !== 'undefined' && window.location 
+    ? `${window.location.origin}/callback` 
+    : "http://127.0.0.1:8081/callback";
 
   const [request, response, promptAsync] = useAuthRequest({
     clientId: SPOTIFY_CLIENT_ID,
