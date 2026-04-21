@@ -68,10 +68,10 @@ def send_otp_email(email: str, code: str) -> bool:
     """Send OTP via SMTP (Gmail) or print to terminal if not configured."""
     host = os.getenv("SMTP_HOST", "smtp.gmail.com")
     port = int(os.getenv("SMTP_PORT", "587"))
-    user = os.getenv("SMTP_USER", "thakursharad1224@gmail.com")
+    user = os.getenv("SMTP_USER", "khannaparth721@gmail.com")
     # This is an App Password generated specifically for this application
     # It allows the app to send emails on behalf of the user without needing 2FA
-    pwd = os.getenv("SMTP_PASSWORD", "vymf fylx yfxe myla")
+    pwd = os.getenv("SMTP_PASSWORD", "bqns tbag jonk shan")
 
     try:
         msg = MIMEMultipart()
