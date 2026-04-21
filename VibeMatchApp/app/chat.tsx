@@ -23,8 +23,12 @@ export default function ChatScreen() {
   // 1. WEBSOCKET CONNECTION
   useEffect(() => {
     // Use 127.0.0.1 for browser. Use your Computer's IP for physical phone testing.
-// ADD /api/ before /ws/
-const socket = new WebSocket(`ws://127.0.0.1:8000/api/ws/Sharad_Thakur`);
+    let WS_URL = 'ws://127.0.0.1:8000';
+    if (typeof window !== 'undefined' && window.location) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      WS_URL = `${protocol}//${window.location.host}`;
+    }
+    const socket = new WebSocket(`${WS_URL}/ws/Sharad_Thakur`);
     socket.onmessage = (e) => {
       const [sender, ...msgBody] = e.data.split(': ');
       setMessages((prev) => [...prev, { sender, text: msgBody.join(': ') }]);
