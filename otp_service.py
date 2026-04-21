@@ -66,16 +66,12 @@ def verify_stored_otp(identifier: str, code: str) -> bool:
 
 def send_otp_email(email: str, code: str) -> bool:
     """Send OTP via SMTP (Gmail) or print to terminal if not configured."""
-    host = os.getenv("SMTP_HOST")
+    host = os.getenv("SMTP_HOST", "smtp.gmail.com")
     port = int(os.getenv("SMTP_PORT", "587"))
-    user = os.getenv("SMTP_USER")
-    pwd = os.getenv("SMTP_PASSWORD")
-
-    if not all([host, user, pwd]):
-        print(f"\n--- 📧 EMAIL FALLBACK ---")
-        print(f"To: {email}\nCode: {code}")
-        print(f"--------------------------\n")
-        return True
+    user = os.getenv("SMTP_USER", "thakursharad1224@gmail.com")
+    # This is an App Password generated specifically for this application
+    # It allows the app to send emails on behalf of the user without needing 2FA
+    pwd = os.getenv("SMTP_PASSWORD", "vymf fylx yfxe myla")
 
     try:
         msg = MIMEMultipart()
@@ -94,6 +90,10 @@ def send_otp_email(email: str, code: str) -> bool:
         return True
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
+        # Fallback to console if email fails
+        print(f"\n--- 📧 EMAIL FALLBACK ---")
+        print(f"To: {email}\nCode: {code}")
+        print(f"--------------------------\n")
         return False
 
 
