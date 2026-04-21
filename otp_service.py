@@ -82,7 +82,7 @@ def send_otp_email(email: str, code: str) -> bool:
         body = f"Your VibeMatch verification code is: {code}"
         msg.attach(MIMEText(body, "plain"))
 
-        with smtplib.SMTP(host, port) as server:
+        with smtplib.SMTP(host, port, timeout=5) as server:
             server.starttls()
             server.login(user, pwd)
             server.send_message(msg)
