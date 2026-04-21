@@ -3,7 +3,8 @@ import { StyleSheet, Text, View, ScrollView, TouchableOpacity, TextInput, Image,
 import axios from 'axios';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
+// Use a relative URL so it works seamlessly when hosted on Render
+const API_BASE_URL = '';
 
 export default function App() {
   const insets = useSafeAreaInsets();
